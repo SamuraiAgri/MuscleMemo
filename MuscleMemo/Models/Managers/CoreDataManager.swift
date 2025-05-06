@@ -31,7 +31,8 @@ class CoreDataManager {
                 try context.save()
             } catch {
                 let nserror = error as NSError
-                fatalError("保存に失敗: \(nserror), \(nserror.userInfo)")
+                print("保存に失敗: \(nserror), \(nserror.userInfo)")
+                // fatalErrorではなくprint文に変更し、アプリのクラッシュを防止
             }
         }
     }
@@ -72,8 +73,6 @@ class CoreDataManager {
         
         do {
             let result = try viewContext.fetch(fetchRequest)
-            // データベースエラーをデバッグログに出力
-            print("取得した種目数: \(result.count)")
             return result
         } catch {
             print("全種目の取得に失敗: \(error)")
@@ -89,7 +88,6 @@ class CoreDataManager {
         
         do {
             let result = try viewContext.fetch(fetchRequest)
-            print("取得したお気に入り種目数: \(result.count)")
             return result
         } catch {
             print("お気に入り種目の取得に失敗: \(error)")
@@ -211,6 +209,70 @@ class CoreDataManager {
         } catch {
             print("期間内のワークアウトセット取得に失敗: \(error)")
             return []
+        }
+    }
+    
+    // MARK: - バッチ処理と高度な操作
+    
+    func batchDeleteAllWorkoutSets() {
+        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = WorkoutSet.fetchRequest()
+        let batchDeleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+        batchDeleteRequest.resultType = .resultTypeObjectIDs
+        
+        do {
+            if let result = try persistentContainer.persistentStoreCoordinator.execute(batchDeleteRequest, with: viewContext) as? NSBatchDeleteResult,
+               let objectIDs = result.result as? [NSManagedObjectID] {
+                let changes = [NSDeletedObjectsKey: objectIDs]
+                NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [viewContext])
+            }
+        } catch {
+            print("バッチ削除に失敗: \(error)")
+        }
+    }
+    
+    func performBackgroundTask(_ task: @escaping (NSManagedObjectContext) -> Void) {
+        persistentContainer.performBackgroundTask { context in
+            task(context)
+            
+            if context.hasChanges {
+                do {
+                    try context.save()
+                } catch {
+                    print("バックグラウンド処理で保存に失敗: \(error)")
+                }
+            }
+        }
+    }
+    
+    func getWorkoutLogByID(id: UUID) -> WorkoutLog? {
+        let fetchRequest: NSFetchRequest<WorkoutLog> = WorkoutLog.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+        fetchRequest.fetchLimit = 1
+        
+        do {
+            let results = try viewContext.fetch(fetchRequest)
+            return results.first
+        } catch {
+            print("WorkoutLog取得エラー: \(error)")
+            return nil
+        }
+    }
+    
+    // MARK: - データクリーンアップ
+    
+    func cleanupEmptyWorkoutLogs() {
+        let fetchRequest: NSFetchRequest<WorkoutLog> = WorkoutLog.fetchRequest()
+        
+        do {
+            let logs = try viewContext.fetch(fetchRequest)
+            for log in logs {
+                if let sets = log.workoutSets, sets.count == 0 {
+                    viewContext.delete(log)
+                }
+            }
+            saveContext()
+        } catch {
+            print("空のWorkoutLogクリーンアップに失敗: \(error)")
         }
     }
 }

@@ -9,10 +9,14 @@ class ExerciseManagementViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     @Published var exercises: [Exercise] = []
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+    @Published var showError = false
     
     init() {
         // 通知を受け取るための設定
         NotificationCenter.default.publisher(for: .favoriteExerciseToggled)
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.loadExercises()
             }
@@ -20,15 +24,42 @@ class ExerciseManagementViewModel: ObservableObject {
     }
     
     func loadExercises() {
-        exercises = coreDataManager.getAllExercises()
-        objectWillChange.send() // 明示的な更新通知
+        isLoading = true
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            let allExercises = self.coreDataManager.getAllExercises()
+            
+            DispatchQueue.main.async {
+                self.exercises = allExercises
+                self.isLoading = false
+                self.objectWillChange.send() // 明示的な更新通知
+            }
+        }
     }
     
     func addExercise(name: String) {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = "種目名を入力してください"
+            showError = true
+            return
+        }
+        
+        // 既存の種目と重複しないか確認
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let existingNames = exercises.compactMap { $0.name?.lowercased() }
+        
+        if existingNames.contains(trimmedName.lowercased()) {
+            errorMessage = "その種目名は既に存在します"
+            showError = true
+            return
+        }
+        
         let context = coreDataManager.viewContext
         let newExercise = Exercise(context: context)
         newExercise.id = UUID()
-        newExercise.name = name
+        newExercise.name = trimmedName
         newExercise.isDefault = false
         newExercise.isFavorite = false
         
@@ -54,6 +85,8 @@ class ExerciseManagementViewModel: ObservableObject {
     func deleteExercise(exercise: Exercise) {
         // デフォルト種目は削除不可
         if exercise.isDefault {
+            errorMessage = "デフォルト種目は削除できません"
+            showError = true
             return
         }
         
@@ -67,8 +100,21 @@ class ExerciseManagementViewModel: ObservableObject {
         }
         
         context.delete(exercise)
-        coreDataManager.saveContext()
-        loadExercises()
+        
+        do {
+            try context.save()
+            loadExercises()
+            
+            // 空になったWorkoutLogを削除
+            coreDataManager.cleanupEmptyWorkoutLogs()
+            
+            // 通知を送信して他の画面を更新
+            NotificationCenter.default.post(name: .workoutUpdated, object: nil)
+        } catch {
+            errorMessage = "種目の削除に失敗しました"
+            showError = true
+            print("種目削除エラー: \(error)")
+        }
     }
     
     // 検索機能

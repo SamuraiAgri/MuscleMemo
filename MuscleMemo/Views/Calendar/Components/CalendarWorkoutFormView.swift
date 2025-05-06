@@ -12,6 +12,13 @@ struct CalendarWorkoutFormView: View {
     
     @State private var weight: Double = 0
     @State private var reps: Int = 1
+    @State private var weightString: String = "0"
+    @State private var repsString: String = "1"
+    @FocusState private var focusedField: Field?
+    
+    enum Field {
+        case weight, reps
+    }
     
     var body: some View {
         NavigationView {
@@ -31,9 +38,7 @@ struct CalendarWorkoutFormView: View {
                         Spacer()
                         
                         Button {
-                            if weight > 0 {
-                                weight = max(0, weight - 2.5)
-                            }
+                            adjustWeight(-2.5)
                         } label: {
                             Image(systemName: "minus.circle.fill")
                                 .foregroundColor(Color.primaryRed)
@@ -41,18 +46,24 @@ struct CalendarWorkoutFormView: View {
                         }
                         .buttonStyle(BorderlessButtonStyle())
                         
-                        TextField("0", value: $weight, formatter: NumberFormatter())
+                        TextField("0", text: $weightString)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.center)
                             .frame(width: 60)
                             .padding(.horizontal, 8)
+                            .focused($focusedField, equals: .weight)
+                            .onChange(of: weightString) { _, newValue in
+                                if let newWeight = Double(newValue.replacingOccurrences(of: ",", with: ".")) {
+                                    weight = newWeight
+                                }
+                            }
                             .overlay(
                                 RoundedRectangle(cornerRadius: 4)
                                     .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                             )
                         
                         Button {
-                            weight += 2.5
+                            adjustWeight(2.5)
                         } label: {
                             Image(systemName: "plus.circle.fill")
                                 .foregroundColor(Color.primaryRed)
@@ -68,9 +79,7 @@ struct CalendarWorkoutFormView: View {
                         Spacer()
                         
                         Button {
-                            if reps > 1 {
-                                reps -= 1
-                            }
+                            adjustReps(-1)
                         } label: {
                             Image(systemName: "minus.circle.fill")
                                 .foregroundColor(Color.primaryRed)
@@ -78,18 +87,24 @@ struct CalendarWorkoutFormView: View {
                         }
                         .buttonStyle(BorderlessButtonStyle())
                         
-                        TextField("1", value: $reps, formatter: NumberFormatter())
+                        TextField("1", text: $repsString)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.center)
                             .frame(width: 60)
                             .padding(.horizontal, 8)
+                            .focused($focusedField, equals: .reps)
+                            .onChange(of: repsString) { _, newValue in
+                                if let newReps = Int(newValue) {
+                                    reps = newReps
+                                }
+                            }
                             .overlay(
                                 RoundedRectangle(cornerRadius: 4)
                                     .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                             )
                         
                         Button {
-                            reps += 1
+                            adjustReps(1)
                         } label: {
                             Image(systemName: "plus.circle.fill")
                                 .foregroundColor(Color.primaryRed)
@@ -110,6 +125,7 @@ struct CalendarWorkoutFormView: View {
                             .cornerRadius(8)
                     }
                     .disabled(!isFormValid)
+                    .sensoryFeedback(.impact(flexibility: .rigid), trigger: isFormValid)
                 }
             }
             .navigationTitle("\(exercise.name ?? "") を記録")
@@ -118,11 +134,20 @@ struct CalendarWorkoutFormView: View {
                     presentationMode.wrappedValue.dismiss()
                 }
             )
+            .toolbar {
+                ToolbarItem(placement: .keyboard) {
+                    Button("完了") {
+                        focusedField = nil
+                    }
+                }
+            }
             .onAppear {
                 // 前回の記録を取得して初期値として設定
                 if let lastSet = CoreDataManager.shared.getLastWorkoutSet(for: exercise) {
                     weight = lastSet.weight
+                    weightString = String(format: "%.1f", lastSet.weight)
                     reps = Int(lastSet.reps)
+                    repsString = "\(lastSet.reps)"
                 }
             }
         }
@@ -139,6 +164,21 @@ struct CalendarWorkoutFormView: View {
         return formatter.string(from: date)
     }
     
+    // 重量調整ヘルパーメソッド（小数点以下の丸めも実施）
+    private func adjustWeight(_ delta: Double) {
+        let newWeight = max(0, weight + delta)
+        // 小数第一位まで丸める
+        weight = (round(newWeight * 10) / 10).rounded(toPlaces: 1)
+        weightString = String(format: "%.1f", weight)
+    }
+    
+    // 回数調整ヘルパーメソッド
+    private func adjustReps(_ delta: Int) {
+        let newReps = max(1, reps + delta)
+        reps = newReps
+        repsString = "\(newReps)"
+    }
+    
     private func saveWorkout() {
         // WorkoutSetを追加
         viewModel.addWorkoutSet(for: date, exercise: exercise, weight: weight, reps: reps)
@@ -146,19 +186,5 @@ struct CalendarWorkoutFormView: View {
         // 画面を閉じる
         onSave(weight, reps)
         presentationMode.wrappedValue.dismiss()
-    }
-}
-
-struct CalendarWorkoutFormView_Previews: PreviewProvider {
-    static var previews: some View {
-        // プレビュー用のダミーデータ
-        let context = PreviewHelper.createPreviewContext()
-        let exercise = context.registeredObjects.first { $0 is Exercise } as! Exercise
-        
-        return CalendarWorkoutFormView(
-            exercise: exercise,
-            date: Date(),
-            onSave: { _, _ in }
-        )
     }
 }

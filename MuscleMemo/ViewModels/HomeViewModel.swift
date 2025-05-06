@@ -12,6 +12,8 @@ class HomeViewModel: ObservableObject {
     @Published var todaysWorkoutSets: [WorkoutSet] = []
     @Published var favoriteExercises: [Exercise] = []
     @Published var isLoading: Bool = false
+    @Published var errorMessage: String?
+    @Published var showError: Bool = false
     
     init() {
         // アプリ起動時に初期データを読み込む
@@ -19,8 +21,17 @@ class HomeViewModel: ObservableObject {
         
         // 通知を受け取るための設定
         NotificationCenter.default.publisher(for: .favoriteExerciseToggled)
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.loadFavoriteExercises()
+            }
+            .store(in: &cancellables)
+        
+        // トレーニング更新通知
+        NotificationCenter.default.publisher(for: .workoutUpdated)
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshTodaysWorkouts()
             }
             .store(in: &cancellables)
     }
@@ -34,27 +45,30 @@ class HomeViewModel: ObservableObject {
     
     func refreshTodaysWorkouts() {
         isLoading = true
+        errorMessage = nil
         
-        let today = Date()
-        
-        if let workoutLog = coreDataManager.getWorkoutLog(for: today) {
-            // workoutLogからWorkoutSetの配列を取得
-            if let sets = workoutLog.workoutSets?.allObjects as? [WorkoutSet] {
-                // 日付で降順ソート
-                todaysWorkoutSets = sets.sorted(by: { set1, set2 in
-                    return set1.id?.uuidString ?? "" > set2.id?.uuidString ?? ""
-                })
-            } else {
-                todaysWorkoutSets = []
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            let today = Date()
+            var sets: [WorkoutSet] = []
+            
+            if let workoutLog = self.coreDataManager.getWorkoutLog(for: today) {
+                if let workoutSets = workoutLog.workoutSets?.allObjects as? [WorkoutSet] {
+                    sets = workoutSets.sorted(by: { set1, set2 in
+                        guard let id1 = set1.id?.uuidString, let id2 = set2.id?.uuidString else {
+                            return false
+                        }
+                        return id1 > id2
+                    })
+                }
             }
-        } else {
-            todaysWorkoutSets = []
-        }
-        
-        // 変更を明示的に通知
-        DispatchQueue.main.async { [weak self] in
-            self?.isLoading = false
-            self?.objectWillChange.send()
+            
+            DispatchQueue.main.async {
+                self.todaysWorkoutSets = sets
+                self.isLoading = false
+                self.objectWillChange.send()
+            }
         }
     }
     
@@ -73,20 +87,26 @@ class HomeViewModel: ObservableObject {
     }
     
     func addWorkoutSet(exercise: Exercise, weight: Double, reps: Int) {
-        let today = Date()
-        let workoutLog = coreDataManager.getOrCreateWorkoutLog(for: today)
-        
-        _ = coreDataManager.addWorkoutSet(
-            to: workoutLog,
-            exercise: exercise,
-            weight: weight,
-            reps: reps
-        )
-        
-        refreshTodaysWorkouts()
-        
-        // トレーニング更新の通知を送信
-        NotificationCenter.default.post(name: .workoutUpdated, object: nil)
+        do {
+            let today = Date()
+            let workoutLog = coreDataManager.getOrCreateWorkoutLog(for: today)
+            
+            _ = coreDataManager.addWorkoutSet(
+                to: workoutLog,
+                exercise: exercise,
+                weight: weight,
+                reps: reps
+            )
+            
+            refreshTodaysWorkouts()
+            
+            // トレーニング更新の通知を送信
+            NotificationCenter.default.post(name: .workoutUpdated, object: nil)
+        } catch {
+            errorMessage = "トレーニング記録の追加に失敗しました"
+            showError = true
+            print("ワークアウト追加エラー: \(error)")
+        }
     }
     
     func getLastWorkoutSet(for exercise: Exercise) -> WorkoutSet? {
@@ -101,5 +121,28 @@ class HomeViewModel: ObservableObject {
         
         // 通知を送信
         NotificationCenter.default.post(name: .favoriteExerciseToggled, object: exercise.id)
+    }
+    
+    // スマートな重量提案機能
+    func suggestNextWeight(for exercise: Exercise) -> Double {
+        guard let lastSet = coreDataManager.getLastWorkoutSet(for: exercise) else {
+            return 0
+        }
+        
+        let lastWeight = lastSet.weight
+        let lastReps = lastSet.reps
+        
+        // 前回が12回以上なら重量アップ、6回未満なら重量ダウン、それ以外は維持
+        if lastReps >= 12 {
+            // 重量5%アップ（最小2.5kg）
+            let increment = max(2.5, lastWeight * 0.05)
+            return round((lastWeight + increment) * 2) / 2  // 0.5kg単位に丸める
+        } else if lastReps < 6 {
+            // 重量5%ダウン
+            let decrement = lastWeight * 0.05
+            return max(0, round((lastWeight - decrement) * 2) / 2)  // 0.5kg単位に丸める
+        }
+        
+        return lastWeight  // 現状維持
     }
 }

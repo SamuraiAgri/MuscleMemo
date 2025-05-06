@@ -35,10 +35,14 @@ class StatisticsViewModel: ObservableObject {
     @Published var chartData: [WeightChartEntry] = []
     @Published var monthlyTrainingDays: Int = 0
     @Published var selectedPeriod: StatisticsPeriod = .month
+    @Published var isLoadingChartData: Bool = false
+    @Published var errorMessage: String?
+    @Published var showError: Bool = false
     
     init() {
         // 通知を受け取るための設定
         NotificationCenter.default.publisher(for: .favoriteExerciseToggled)
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.loadExercises()
             }
@@ -46,8 +50,12 @@ class StatisticsViewModel: ObservableObject {
         
         // トレーニング更新の通知を受け取る
         NotificationCenter.default.publisher(for: .workoutUpdated)
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 self?.calculateMonthlyTrainingFrequency()
+                if let selectedExercise = self?.exercises.first {
+                    self?.loadChartData(for: selectedExercise)
+                }
             }
             .store(in: &cancellables)
     }
@@ -55,51 +63,71 @@ class StatisticsViewModel: ObservableObject {
     func loadExercises() {
         // トレーニング記録のある種目のみを取得
         let allExercises = coreDataManager.getAllExercises()
-        exercises = allExercises.filter { exercise in
-            guard let sets = exercise.workoutSets?.allObjects as? [WorkoutSet], !sets.isEmpty else {
-                return false
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let filteredExercises = allExercises.filter { exercise in
+                guard let sets = exercise.workoutSets?.allObjects as? [WorkoutSet], !sets.isEmpty else {
+                    return false
+                }
+                return true
             }
-            return true
+            
+            DispatchQueue.main.async {
+                self?.exercises = filteredExercises
+                self?.objectWillChange.send()
+            }
         }
     }
     
     func loadChartData(for exercise: Exercise) {
+        isLoadingChartData = true
+        chartData = []
+        errorMessage = nil
+        
         let endDate = Date()
         let months = selectedPeriod.rawValue
         
         guard let startDate = calendar.date(byAdding: .month, value: -months, to: endDate) else {
+            isLoadingChartData = false
             chartData = []
             return
         }
         
-        // 対象期間のワークアウトセットを取得
-        let workoutSets = coreDataManager.getWorkoutSets(for: exercise, between: startDate, and: endDate)
-        
-        // 日付ごとに最大の重量を抽出
-        var weightByDate: [Date: Double] = [:]
-        
-        for set in workoutSets {
-            guard let date = set.workoutLog?.date else { continue }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
             
-            // 日付の時間部分を削除して日付だけを取得
-            let dateKey = calendar.startOfDay(for: date)
+            // 対象期間のワークアウトセットを取得
+            let workoutSets = self.coreDataManager.getWorkoutSets(for: exercise, between: startDate, and: endDate)
             
-            if let existingWeight = weightByDate[dateKey], existingWeight >= set.weight {
-                // 既存の重量の方が大きい場合はスキップ
-                continue
+            // 日付ごとに最大の重量を抽出
+            var weightByDate: [Date: Double] = [:]
+            
+            for set in workoutSets {
+                guard let date = set.workoutLog?.date else { continue }
+                
+                // 日付の時間部分を削除して日付だけを取得
+                let dateKey = self.calendar.startOfDay(for: date)
+                
+                if let existingWeight = weightByDate[dateKey], existingWeight >= set.weight {
+                    // 既存の重量の方が大きい場合はスキップ
+                    continue
+                }
+                
+                // 新しい重量を記録
+                weightByDate[dateKey] = set.weight
             }
             
-            // 新しい重量を記録
-            weightByDate[dateKey] = set.weight
+            // チャートデータに変換してソート
+            let newChartData = weightByDate.map { date, weight in
+                WeightChartEntry(date: date, weight: weight)
+            }.sorted { $0.date < $1.date }
+            
+            DispatchQueue.main.async {
+                self.chartData = newChartData
+                self.isLoadingChartData = false
+                self.objectWillChange.send()
+            }
         }
-        
-        // チャートデータに変換してソート
-        chartData = weightByDate.map { date, weight in
-            WeightChartEntry(date: date, weight: weight)
-        }.sorted { $0.date < $1.date }
-        
-        // データ更新を通知
-        objectWillChange.send()
     }
     
     func calculateMonthlyTrainingFrequency() {
@@ -133,8 +161,6 @@ class StatisticsViewModel: ObservableObject {
             self?.monthlyTrainingDays = filteredDates.count
             self?.objectWillChange.send()
         }
-        
-        print("今月(\(calendar.component(.month, from: today))月)のトレーニング日数: \(filteredDates.count)")
     }
     
     func getLastWeightForExercise(_ exercise: Exercise) -> Double {
@@ -160,16 +186,38 @@ class StatisticsViewModel: ObservableObject {
         let totalWeight = workoutSets.reduce(0) { $0 + $1.weight }
         return totalWeight / Double(workoutSets.count)
     }
-    
-    func getChartDataForExercise(_ exercise: Exercise) -> [WeightChartEntry] {
-        if chartData.isEmpty {
-            loadChartData(for: exercise)
+        func getChartDataForExercise(_ exercise: Exercise) -> [WeightChartEntry] {
+            if chartData.isEmpty || isLoadingChartData {
+                loadChartData(for: exercise)
+            }
+            return chartData
         }
-        return chartData
+        
+        // 重量提案機能の追加
+        func suggestNextWeight(for exercise: Exercise) -> Double {
+            guard let lastSet = coreDataManager.getLastWorkoutSet(for: exercise) else {
+                return 0
+            }
+            
+            let lastWeight = lastSet.weight
+            let lastReps = lastSet.reps
+            
+            // 前回が12回以上なら重量アップ、6回未満なら重量ダウン、それ以外は維持
+            if lastReps >= 12 {
+                // 重量5%アップ（最小2.5kg）
+                let increment = max(2.5, lastWeight * 0.05)
+                return round((lastWeight + increment) * 2) / 2  // 0.5kg単位に丸める
+            } else if lastReps < 6 {
+                // 重量5%ダウン
+                let decrement = lastWeight * 0.05
+                return max(0, round((lastWeight - decrement) * 2) / 2)  // 0.5kg単位に丸める
+            }
+            
+            return lastWeight  // 現状維持
+        }
     }
-}
 
-// トレーニング更新の通知
-extension Notification.Name {
-    static let workoutUpdated = Notification.Name("workoutUpdated")
-}
+    // トレーニング更新の通知
+    extension Notification.Name {
+        static let workoutUpdated = Notification.Name("workoutUpdated")
+    }

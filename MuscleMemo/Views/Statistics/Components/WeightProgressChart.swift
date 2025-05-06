@@ -8,6 +8,16 @@ struct WeightProgressChart: View {
     let chartData: [WeightChartEntry]
     @Binding var selectedPeriod: StatisticsPeriod
     
+    // チャートデータが空かどうかチェック
+    private var hasData: Bool {
+        return !chartData.isEmpty
+    }
+    
+    // 最高記録エントリーを取得
+    private var maxEntry: WeightChartEntry? {
+        return chartData.max(by: { $0.weight < $1.weight })
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -27,24 +37,27 @@ struct WeightProgressChart: View {
                 .scaleEffect(0.9)
             }
             
-            if chartData.isEmpty {
+            if !hasData {
                 Text("データがありません")
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 60)
             } else {
-                Chart(chartData) { entry in
-                    LineMark(
-                        x: .value("日付", entry.date),
-                        y: .value("重量", entry.weight)
-                    )
-                    .foregroundStyle(Color.primaryRed)
-                    
-                    PointMark(
-                        x: .value("日付", entry.date),
-                        y: .value("重量", entry.weight)
-                    )
-                    .foregroundStyle(Color.primaryRed)
+                Chart {
+                    ForEach(chartData) { entry in
+                        LineMark(
+                            x: .value("日付", entry.date),
+                            y: .value("重量", entry.weight)
+                        )
+                        .foregroundStyle(Color.primaryRed)
+                        .interpolationMethod(.catmullRom)
+                        
+                        PointMark(
+                            x: .value("日付", entry.date),
+                            y: .value("重量", entry.weight)
+                        )
+                        .foregroundStyle(Color.primaryRed)
+                    }
                 }
                 .frame(height: 200)
                 .chartXAxis {
@@ -67,10 +80,11 @@ struct WeightProgressChart: View {
                         }
                     }
                 }
+                .chartYScale(domain: yAxisDomain)
             }
             
             // 最高記録と日付
-            if let maxEntry = chartData.max(by: { $0.weight < $1.weight }) {
+            if let maxEntry = maxEntry {
                 HStack {
                     Text("最高記録:")
                         .font(.subheadline)
@@ -95,49 +109,21 @@ struct WeightProgressChart: View {
     
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy/MM/dd"
+        formatter.dateFormat = "MM/dd"
         return formatter
     }
-}
-
-struct WeightProgressChart_Previews: PreviewProvider {
-    static var previews: some View {
-        let context = PreviewHelper.createPreviewContext()
-        let exercise = (context.registeredObjects.first { $0 is Exercise }) as! Exercise
-        
-        let today = Date()
-        let calendar = Calendar.current
-        
-        // サンプルデータ作成
-        var sampleData: [WeightChartEntry] = []
-        for i in 0..<10 {
-            if let date = calendar.date(byAdding: .day, value: -i * 3, to: today) {
-                let entry = WeightChartEntry(
-                    date: date,
-                    weight: Double(60 + i)
-                )
-                sampleData.append(entry)
-            }
+    
+    // Y軸のスケールを調整（データの最小値から最大値までを少し余裕を持たせて表示）
+    private var yAxisDomain: ClosedRange<Double> {
+        if chartData.isEmpty {
+            return 0...100
         }
         
-        return VStack {
-            // データあり
-            WeightProgressChart(
-                exercise: exercise,
-                chartData: sampleData,
-                selectedPeriod: .constant(.month)
-            )
-            .padding()
-            
-            // データなし
-            WeightProgressChart(
-                exercise: exercise,
-                chartData: [],
-                selectedPeriod: .constant(.month)
-            )
-            .padding()
-        }
-        .background(Color.lightGray)
-        .previewLayout(.sizeThatFits)
+        let minWeight = chartData.map { $0.weight }.min() ?? 0
+        let maxWeight = chartData.map { $0.weight }.max() ?? 100
+        
+        // 上下に少し余裕を持たせる（最低でも10kgの範囲）
+        let padding = max(5.0, (maxWeight - minWeight) * 0.1)
+        return max(0, minWeight - padding)...maxWeight + padding
     }
 }

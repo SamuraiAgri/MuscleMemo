@@ -20,82 +20,124 @@ struct ExerciseManagementView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // 検索バー
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.gray)
-                
-                TextField("種目を検索", text: $searchText)
-                    .foregroundColor(.primary)
-                
-                if !searchText.isEmpty {
-                    Button(action: {
-                        searchText = ""
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.gray)
+        ZStack {
+            VStack(spacing: 0) {
+                // 検索バー
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.gray)
+                    
+                    TextField("種目を検索", text: $searchText)
+                        .foregroundColor(.primary)
+                    
+                    if !searchText.isEmpty {
+                        Button(action: {
+                            searchText = ""
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.gray)
+                        }
                     }
                 }
-            }
-            .padding(8)
-            .background(Color.lightGray)
-            .cornerRadius(10)
-            .padding([.horizontal, .top])
-            
-            // カテゴリーフィルター
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(ExerciseCategory.allCases) { category in
-                        CategoryButton(
-                            title: category.rawValue,
-                            isSelected: selectedCategory == category,
-                            action: {
-                                selectedCategory = category
-                            }
-                        )
-                    }
-                }
+                .padding(8)
+                .background(Color.lightGray)
+                .cornerRadius(10)
                 .padding([.horizontal, .top])
+                
+                // カテゴリーフィルター
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(ExerciseCategory.allCases) { category in
+                            CategoryButton(
+                                title: category.rawValue,
+                                isSelected: selectedCategory == category,
+                                action: {
+                                    selectedCategory = category
+                                }
+                            )
+                        }
+                    }
+                    .padding([.horizontal, .top])
+                }
+                
+                // 種目リスト
+                if viewModel.exercises.isEmpty {
+                    ContentUnavailableView(
+                        "種目がありません",
+                        systemImage: "dumbbell",
+                        description: Text("右上の+ボタンから新しい種目を追加しましょう")
+                    )
+                } else if filteredExercises.isEmpty {
+                    ContentUnavailableView(
+                        "一致する種目がありません",
+                        systemImage: "magnifyingglass",
+                        description: Text("検索条件やカテゴリを変更してみてください")
+                    )
+                } else {
+                    List {
+                        ForEach(filteredExercises, id: \.id) { exercise in
+                            ExerciseManagementRow(
+                                exercise: exercise,
+                                onToggleFavorite: {
+                                    viewModel.toggleFavorite(exercise: exercise)
+                                }
+                            )
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if !exercise.isDefault {
+                                    Button(role: .destructive) {
+                                        viewModel.deleteExercise(exercise: exercise)
+                                    } label: {
+                                        Label("削除", systemImage: "trash")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(PlainListStyle())
+                }
+            }
+            .navigationTitle("種目管理")
+            .navigationBarItems(
+                trailing: Button(action: {
+                    showingAddExercise = true
+                }) {
+                    Image(systemName: "plus")
+                }
+            )
+            .sheet(isPresented: $showingAddExercise) {
+                AddExerciseView(onSave: { name in
+                    viewModel.addExercise(name: name)
+                })
+            }
+            .onAppear {
+                viewModel.loadExercises()
             }
             
-            // 種目リスト
-            List {
-                ForEach(filteredExercises, id: \.id) { exercise in
-                    ExerciseManagementRow(
-                        exercise: exercise,
-                        onToggleFavorite: {
-                            viewModel.toggleFavorite(exercise: exercise)
-                        }
-                    )
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if !exercise.isDefault {
-                            Button(role: .destructive) {
-                                viewModel.deleteExercise(exercise: exercise)
-                            } label: {
-                                Label("削除", systemImage: "trash")
-                            }
+            if viewModel.isLoading {
+                LoadingView()
+            }
+            
+            // エラー表示
+            if viewModel.showError {
+                VStack {
+                    Text(viewModel.errorMessage ?? "エラーが発生しました")
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.red.opacity(0.8))
+                        .cornerRadius(8)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, 100)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(1)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        withAnimation {
+                            viewModel.showError = false
                         }
                     }
                 }
             }
-            .listStyle(PlainListStyle())
-        }
-        .navigationTitle("種目管理")
-        .navigationBarItems(
-            trailing: Button(action: {
-                showingAddExercise = true
-            }) {
-                Image(systemName: "plus")
-            }
-        )
-        .sheet(isPresented: $showingAddExercise) {
-            AddExerciseView(onSave: { name in
-                viewModel.addExercise(name: name)
-            })
-        }
-        .onAppear {
-            viewModel.loadExercises()
         }
     }
 }
@@ -148,14 +190,5 @@ struct ExerciseManagementRow: View {
             .buttonStyle(PlainButtonStyle())
         }
         .padding(.vertical, 4)
-    }
-}
-
-struct ExerciseManagementView_Previews: PreviewProvider {
-    static var previews: some View {
-        NavigationView {
-            ExerciseManagementView()
-                .environment(\.managedObjectContext, CoreDataManager.shared.viewContext)
-        }
     }
 }

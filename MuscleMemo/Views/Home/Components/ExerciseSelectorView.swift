@@ -10,6 +10,7 @@ struct ExerciseSelectorView: View {
     @State private var searchText = ""
     @State private var showingAddExercise = false
     @State private var exercises: [Exercise] = []
+    @State private var isLoading = false
     
     let onExerciseSelected: (Exercise) -> Void
     let coreDataManager = CoreDataManager.shared
@@ -25,69 +26,83 @@ struct ExerciseSelectorView: View {
     }
     
     var body: some View {
-        VStack {
-            // 検索バー
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.gray)
-                
-                TextField("種目を検索", text: $searchText)
-                    .foregroundColor(.primary)
-                
-                if !searchText.isEmpty {
-                    Button(action: {
-                        searchText = ""
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.gray)
-                    }
-                }
-            }
-            .padding(8)
-            .background(Color.lightGray)
-            .cornerRadius(10)
-            .padding(.horizontal)
-            
-            // 種目リスト
-            List {
-                ForEach(filteredExercises, id: \.id) { exercise in
-                    ExerciseRow(
-                        exercise: exercise,
-                        onToggleFavorite: {
-                            toggleFavorite(exercise: exercise)
+        ZStack {
+            VStack {
+                // 検索バー
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.gray)
+                    
+                    TextField("種目を検索", text: $searchText)
+                        .foregroundColor(.primary)
+                    
+                    if !searchText.isEmpty {
+                        Button(action: {
+                            searchText = ""
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.gray)
                         }
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onExerciseSelected(exercise)
                     }
                 }
+                .padding(8)
+                .background(Color.lightGray)
+                .cornerRadius(10)
+                .padding(.horizontal)
+                
+                // 種目リスト
+                List {
+                    ForEach(filteredExercises, id: \.id) { exercise in
+                        ExerciseRow(
+                            exercise: exercise,
+                            onToggleFavorite: {
+                                toggleFavorite(exercise: exercise)
+                            }
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onExerciseSelected(exercise)
+                        }
+                    }
+                }
+                .listStyle(PlainListStyle())
             }
-            .listStyle(PlainListStyle())
-        }
-        .navigationTitle("トレーニング種目")
-        .navigationBarItems(
-            leading: Button("キャンセル") {
-                presentationMode.wrappedValue.dismiss()
-            },
-            trailing: Button(action: {
-                showingAddExercise = true
-            }) {
-                Image(systemName: "plus")
+            .navigationTitle("トレーニング種目")
+            .navigationBarItems(
+                leading: Button("キャンセル") {
+                    presentationMode.wrappedValue.dismiss()
+                },
+                trailing: Button(action: {
+                    showingAddExercise = true
+                }) {
+                    Image(systemName: "plus")
+                }
+            )
+            .sheet(isPresented: $showingAddExercise) {
+                AddExerciseView(onSave: { name in
+                    addExercise(name: name)
+                })
             }
-        )
-        .sheet(isPresented: $showingAddExercise) {
-            AddExerciseView(onSave: { name in
-                addExercise(name: name)
-            })
-        }
-        .onAppear {
-            loadExercises()
+            .onAppear {
+                isLoading = true
+                loadExercises()
+            }
+            
+            if isLoading {
+                LoadingView()
+            }
         }
     }
     
     private func loadExercises() {
-        exercises = coreDataManager.getAllExercises()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let allExercises = coreDataManager.getAllExercises()
+            
+            DispatchQueue.main.async {
+                exercises = allExercises
+                isLoading = false
+            }
+        }
     }
     
     private func toggleFavorite(exercise: Exercise) {
@@ -95,23 +110,18 @@ struct ExerciseSelectorView: View {
         exercise.isFavorite.toggle()
         coreDataManager.saveContext()
         
-        // リストを更新 - 変更後に再取得することで状態を同期
-        DispatchQueue.main.async {
-            // 少し遅延させて状態の更新を安定させる
-            self.loadExercises()
-        }
+        // UIを更新 - Exerciseが ObservedObject なので自動更新される
         
         // 通知を発行して他のビューに状態変更を伝える
-        // ここでは遅延実行して画面が白くならないようにする
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NotificationCenter.default.post(
-                name: .favoriteExerciseToggled,
-                object: exercise.id
-            )
-        }
+        NotificationCenter.default.post(
+            name: .favoriteExerciseToggled,
+            object: exercise.id
+        )
     }
     
     private func addExercise(name: String) {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        
         let newExercise = Exercise(context: viewContext)
         newExercise.id = UUID()
         newExercise.name = name
@@ -146,10 +156,10 @@ struct ExerciseRow: View {
     }
 }
 
-// その他のコードは変更なし
 struct AddExerciseView: View {
     @Environment(\.presentationMode) private var presentationMode
     @State private var exerciseName = ""
+    @FocusState private var isTextFieldFocused: Bool
     let onSave: (String) -> Void
     
     var body: some View {
@@ -157,6 +167,7 @@ struct AddExerciseView: View {
             Form {
                 Section(header: Text("種目名")) {
                     TextField("新しい種目名を入力", text: $exerciseName)
+                        .focused($isTextFieldFocused)
                 }
             }
             .navigationTitle("種目を追加")
@@ -169,17 +180,14 @@ struct AddExerciseView: View {
                     onSave(exerciseName)
                     presentationMode.wrappedValue.dismiss()
                 }
-                .disabled(exerciseName.isEmpty)
+                .disabled(exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             )
-        }
-    }
-}
-
-struct ExerciseSelectorView_Previews: PreviewProvider {
-    static var previews: some View {
-        NavigationView {
-            ExerciseSelectorView(onExerciseSelected: { _ in })
-                .environment(\.managedObjectContext, CoreDataManager.shared.viewContext)
+            .onAppear {
+                // キーボードを自動的に表示
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    isTextFieldFocused = true
+                }
+            }
         }
     }
 }

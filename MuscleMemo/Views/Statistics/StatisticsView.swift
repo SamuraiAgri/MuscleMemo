@@ -10,41 +10,71 @@ struct StatisticsView: View {
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // 種目選択
-                    ExerciseSelectionCard(
-                        selectedExercise: selectedExercise?.name ?? "種目を選択",
-                        onTap: {
-                            isSelectingExercise = true
-                        }
-                    )
-                    
-                    if let exercise = selectedExercise {
-                        // 統計パネル
-                        StatsPanel(
-                            lastWeight: viewModel.getLastWeightForExercise(exercise),
-                            maxWeight: viewModel.getMaxWeightForExercise(exercise),
-                            averageWeight: viewModel.getAverageWeightForExercise(exercise)
+            ZStack {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // 種目選択
+                        ExerciseSelectionCard(
+                            selectedExercise: selectedExercise?.name ?? "種目を選択",
+                            onTap: {
+                                isSelectingExercise = true
+                            }
                         )
                         
-                        // 重量推移グラフ
-                        WeightProgressChart(
-                            exercise: exercise,
-                            chartData: viewModel.getChartDataForExercise(exercise),
-                            selectedPeriod: $viewModel.selectedPeriod
-                        )
-                    } else {
-                        // 種目未選択時のプレースホルダー
-                        WeightProgressPlaceholder()
+                        if let exercise = selectedExercise {
+                            // 統計パネル
+                            StatsPanel(
+                                lastWeight: viewModel.getLastWeightForExercise(exercise),
+                                maxWeight: viewModel.getMaxWeightForExercise(exercise),
+                                averageWeight: viewModel.getAverageWeightForExercise(exercise)
+                            )
+                            
+                            // 重量推移グラフ
+                            ZStack {
+                                WeightProgressChart(
+                                    exercise: exercise,
+                                    chartData: viewModel.getChartDataForExercise(exercise),
+                                    selectedPeriod: $viewModel.selectedPeriod
+                                )
+                                
+                                if viewModel.isLoadingChartData {
+                                    LoadingView()
+                                }
+                            }
+                        } else {
+                            // 種目未選択時のプレースホルダー
+                            WeightProgressPlaceholder()
+                        }
+                        
+                        // 月間トレーニング頻度
+                        TrainingFrequencyCard(frequency: viewModel.monthlyTrainingDays)
                     }
-                    
-                    // 月間トレーニング頻度
-                    TrainingFrequencyCard(frequency: viewModel.monthlyTrainingDays)
+                    .padding()
                 }
-                .padding()
+                .background(Color.lightGray.ignoresSafeArea())
+                
+                // エラー表示
+                if viewModel.showError {
+                    VStack {
+                        Text(viewModel.errorMessage ?? "エラーが発生しました")
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.red.opacity(0.8))
+                            .cornerRadius(8)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 100)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(1)
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            withAnimation {
+                                viewModel.showError = false
+                            }
+                        }
+                    }
+                }
             }
-            .background(Color.lightGray.ignoresSafeArea())
             .navigationTitle("統計")
             .sheet(isPresented: $isSelectingExercise) {
                 ExercisePickerView(
@@ -65,7 +95,6 @@ struct StatisticsView: View {
                     }
                 }
             }
-            // iOS 17で非推奨のメソッドを最新の形式に更新
             .onChange(of: selectedExercise) { _, newValue in
                 if let exercise = newValue {
                     viewModel.loadChartData(for: exercise)
@@ -190,7 +219,8 @@ struct TrainingFrequencyCard: View {
                     .font(.system(size: 48, weight: .bold))
                     .foregroundColor(Color.primaryRed)
                 
-                Text("/ 30 日")
+                let daysInMonth = Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30
+                Text("/ \(daysInMonth) 日")
                     .font(.subheadline)
                     .foregroundColor(Color.darkGray)
                     .padding(.bottom, 10)
@@ -204,8 +234,9 @@ struct TrainingFrequencyCard: View {
                         .foregroundColor(Color.lightGray)
                         .cornerRadius(3)
                     
+                    let daysInMonth = Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30
                     Rectangle()
-                        .frame(width: min(CGFloat(frequency) / 30.0 * geometry.size.width, geometry.size.width), height: 6)
+                        .frame(width: min(CGFloat(frequency) / CGFloat(daysInMonth) * geometry.size.width, geometry.size.width), height: 6)
                         .foregroundColor(Color.primaryRed)
                         .cornerRadius(3)
                 }
@@ -254,12 +285,5 @@ struct ExercisePickerView: View {
                 }
             )
         }
-    }
-}
-
-struct StatisticsView_Previews: PreviewProvider {
-    static var previews: some View {
-        StatisticsView()
-            .environment(\.managedObjectContext, CoreDataManager.shared.viewContext)
     }
 }

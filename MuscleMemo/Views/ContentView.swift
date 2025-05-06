@@ -6,6 +6,7 @@ import CoreData
 struct ContentView: View {
     @State private var selectedTab = 0
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.scenePhase) private var scenePhase
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -46,6 +47,12 @@ struct ContentView: View {
             printDatabaseDebugInfo()
             #endif
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                // アプリがバックグラウンドに移行したときにデータを保存
+                CoreDataManager.shared.saveContext()
+            }
+        }
     }
     
     // デバッグ用のデータベース状態出力
@@ -79,12 +86,5 @@ struct ContentView: View {
         } catch {
             print("❌ WorkoutLogの取得に失敗: \(error)")
         }
-    }
-}
-
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-            .environment(\.managedObjectContext, CoreDataManager.shared.viewContext)
     }
 }

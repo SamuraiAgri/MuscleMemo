@@ -12,6 +12,8 @@ class CalendarViewModel: ObservableObject {
     @Published var datesWithWorkouts: [Date] = []
     @Published var workoutSets: [WorkoutSet] = []
     @Published var showWorkoutForm = false
+    @Published var errorMessage: String?
+    @Published var showError = false
     
     var currentMonthString: String {
         let formatter = DateFormatter()
@@ -74,7 +76,10 @@ class CalendarViewModel: ObservableObject {
         if let workoutLog = coreDataManager.getWorkoutLog(for: date) {
             if let sets = workoutLog.workoutSets?.allObjects as? [WorkoutSet] {
                 workoutSets = sets.sorted(by: { set1, set2 in
-                    return set1.id?.uuidString ?? "" > set2.id?.uuidString ?? ""
+                    guard let id1 = set1.id?.uuidString, let id2 = set2.id?.uuidString else {
+                        return false
+                    }
+                    return id1 > id2
                 })
             } else {
                 workoutSets = []
@@ -85,31 +90,58 @@ class CalendarViewModel: ObservableObject {
     }
     
     func addWorkoutSet(for date: Date, exercise: Exercise, weight: Double, reps: Int) {
-        let workoutLog = coreDataManager.getOrCreateWorkoutLog(for: date)
-        
-        _ = coreDataManager.addWorkoutSet(
-            to: workoutLog,
-            exercise: exercise,
-            weight: weight,
-            reps: reps
-        )
-        
-        loadWorkouts(for: date)
-        refreshDatesWithWorkouts()
-        
-        // トレーニング更新の通知を送信
-        NotificationCenter.default.post(name: .workoutUpdated, object: nil)
+        do {
+            let workoutLog = coreDataManager.getOrCreateWorkoutLog(for: date)
+            
+            _ = coreDataManager.addWorkoutSet(
+                to: workoutLog,
+                exercise: exercise,
+                weight: weight,
+                reps: reps
+            )
+            
+            loadWorkouts(for: date)
+            refreshDatesWithWorkouts()
+            
+            // トレーニング更新の通知を送信
+            NotificationCenter.default.post(name: .workoutUpdated, object: nil)
+        } catch {
+            errorMessage = "トレーニングの追加に失敗しました"
+            showError = true
+            print("ワークアウト追加エラー: \(error)")
+        }
     }
     
     func deleteWorkoutSet(_ workoutSet: WorkoutSet) {
-        if let date = workoutSet.workoutLog?.date {
-            // CoreDataから削除
-            coreDataManager.viewContext.delete(workoutSet)
-            coreDataManager.saveContext()
+        guard let date = workoutSet.workoutLog?.date else {
+            print("WorkoutSetの削除に失敗: 関連するWorkoutLogが見つかりません")
+            return
+        }
+        
+        // 削除前にIDをローカル変数に保持
+        let workoutLogID = workoutSet.workoutLog?.id
+        
+        // CoreDataから削除
+        coreDataManager.viewContext.delete(workoutSet)
+        
+        do {
+            try coreDataManager.viewContext.save()
             
             // UIを更新
             loadWorkouts(for: date)
             refreshDatesWithWorkouts()
+            
+            // ログに残っているセットがない場合はログも削除
+            if let logID = workoutLogID,
+               let log = coreDataManager.getWorkoutLogByID(id: logID),
+               log.workoutSets?.count == 0 {
+                coreDataManager.viewContext.delete(log)
+                try coreDataManager.viewContext.save()
+            }
+        } catch {
+            errorMessage = "トレーニングの削除に失敗しました"
+            showError = true
+            print("WorkoutSet削除エラー: \(error)")
         }
     }
 }

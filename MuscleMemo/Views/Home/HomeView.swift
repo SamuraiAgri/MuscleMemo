@@ -32,6 +32,11 @@ struct HomeView: View {
                     }
                     .padding()
                 }
+                .overlay(Group {
+                    if viewModel.isLoading {
+                        LoadingView()
+                    }
+                })
                 
                 VStack {
                     Spacer()
@@ -54,6 +59,28 @@ struct HomeView: View {
                         Color.lightGray
                             .edgesIgnoringSafeArea(.bottom)
                     )
+                }
+                
+                // エラー表示
+                if viewModel.showError {
+                    VStack {
+                        Text(viewModel.errorMessage ?? "エラーが発生しました")
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.red.opacity(0.8))
+                            .cornerRadius(8)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 100)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(1)
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            withAnimation {
+                                viewModel.showError = false
+                            }
+                        }
+                    }
                 }
             }
             .navigationTitle("今日のトレーニング")
@@ -130,7 +157,6 @@ struct WorkoutSummaryCard: View {
 struct FavoriteExerciseList: View {
     let exercises: [Exercise]
     let onExerciseSelected: (Exercise) -> Void
-    @State private var isRefreshing = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -161,59 +187,36 @@ struct FavoriteExerciseList: View {
                 }
                 .padding(.vertical, 10)
             } else {
-                // より安定したレイアウト - ZStackを使用してローディング表示を重ねる
-                ZStack {
-                    // グリッドレイアウト
-                    LazyVGrid(columns: [
-                        GridItem(.flexible(), spacing: 10),
-                        GridItem(.flexible(), spacing: 10)
-                    ], spacing: 10) {
-                        ForEach(exercises, id: \.id) { exercise in
-                            Button(action: {
-                                onExerciseSelected(exercise)
-                            }) {
-                                HStack {
-                                    Text(exercise.name ?? "")
-                                        .fontWeight(.medium)
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 40)
-                                .background(Color.primaryRed)
-                                .cornerRadius(8)
+                // より安定したレイアウト - LazyVGridを使用
+                LazyVGrid(columns: [
+                    GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10)
+                ], spacing: 10) {
+                    ForEach(exercises) { exercise in
+                        Button(action: {
+                            onExerciseSelected(exercise)
+                        }) {
+                            HStack {
+                                Text(exercise.name ?? "")
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
                             }
-                            .buttonStyle(BorderlessButtonStyle())
-                            .id(exercise.id)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 40)
+                            .background(Color.primaryRed)
+                            .cornerRadius(8)
                         }
+                        .buttonStyle(BorderlessButtonStyle())
+                        .id(exercise.id)
                     }
-                    .padding(.top, 8)
                 }
+                .padding(.top, 8)
             }
         }
         .padding()
         .background(Color.white)
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
-        .onAppear {
-            // 画面表示時に更新
-            withAnimation {
-                isRefreshing = true
-            }
-            
-            // 少し遅延させて確実に更新
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                withAnimation {
-                    isRefreshing = false
-                }
-            }
-        }
-    }
-}
-
-struct HomeView_Previews: PreviewProvider {
-    static var previews: some View {
-        HomeView()
-            .environment(\.managedObjectContext, CoreDataManager.shared.viewContext)
     }
 }
