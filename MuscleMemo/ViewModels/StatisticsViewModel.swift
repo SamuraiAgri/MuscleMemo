@@ -216,8 +216,3 @@ class StatisticsViewModel: ObservableObject {
             return lastWeight  // 現状維持
         }
     }
-
-    // トレーニング更新の通知
-    extension Notification.Name {
-        static let workoutUpdated = Notification.Name("workoutUpdated")
-    }

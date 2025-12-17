@@ -195,4 +195,5 @@ struct AddExerciseView: View {
 // 通知名の拡張
 extension Notification.Name {
     static let favoriteExerciseToggled = Notification.Name("favoriteExerciseToggled")
+    static let workoutUpdated = Notification.Name("workoutUpdated")
 }

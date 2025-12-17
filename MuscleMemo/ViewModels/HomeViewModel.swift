@@ -87,25 +87,63 @@ class HomeViewModel: ObservableObject {
     }
     
     func addWorkoutSet(exercise: Exercise, weight: Double, reps: Int) {
+        let today = Date()
+        let workoutLog = coreDataManager.getOrCreateWorkoutLog(for: today)
+        
+        _ = coreDataManager.addWorkoutSet(
+            to: workoutLog,
+            exercise: exercise,
+            weight: weight,
+            reps: reps
+        )
+        
+        refreshTodaysWorkouts()
+        
+        // トレーニング更新の通知を送信
+        NotificationCenter.default.post(name: .workoutUpdated, object: nil)
+    }
+    
+    // ワークアウトセットを削除
+    func deleteWorkoutSet(_ workoutSet: WorkoutSet) {
+        guard let date = workoutSet.workoutLog?.date else { return }
+        
+        let workoutLogID = workoutSet.workoutLog?.id
+        
+        coreDataManager.viewContext.delete(workoutSet)
+        
         do {
-            let today = Date()
-            let workoutLog = coreDataManager.getOrCreateWorkoutLog(for: today)
+            try coreDataManager.viewContext.save()
             
-            _ = coreDataManager.addWorkoutSet(
-                to: workoutLog,
-                exercise: exercise,
-                weight: weight,
-                reps: reps
-            )
+            // 空になったWorkoutLogを削除
+            if let logID = workoutLogID,
+               let log = coreDataManager.getWorkoutLogByID(id: logID),
+               log.workoutSets?.count == 0 {
+                coreDataManager.viewContext.delete(log)
+                try coreDataManager.viewContext.save()
+            }
             
             refreshTodaysWorkouts()
-            
-            // トレーニング更新の通知を送信
             NotificationCenter.default.post(name: .workoutUpdated, object: nil)
         } catch {
-            errorMessage = "トレーニング記録の追加に失敗しました"
+            errorMessage = "トレーニング記録の削除に失敗しました"
             showError = true
-            print("ワークアウト追加エラー: \(error)")
+            print("WorkoutSet削除エラー: \(error)")
+        }
+    }
+    
+    // ワークアウトセットを更新
+    func updateWorkoutSet(_ workoutSet: WorkoutSet, weight: Double, reps: Int) {
+        workoutSet.weight = weight
+        workoutSet.reps = Int16(reps)
+        
+        do {
+            try coreDataManager.viewContext.save()
+            refreshTodaysWorkouts()
+            NotificationCenter.default.post(name: .workoutUpdated, object: nil)
+        } catch {
+            errorMessage = "トレーニング記録の更新に失敗しました"
+            showError = true
+            print("WorkoutSet更新エラー: \(error)")
         }
     }
     

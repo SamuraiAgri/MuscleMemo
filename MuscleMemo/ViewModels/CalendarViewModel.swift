@@ -90,25 +90,39 @@ class CalendarViewModel: ObservableObject {
     }
     
     func addWorkoutSet(for date: Date, exercise: Exercise, weight: Double, reps: Int) {
+        let workoutLog = coreDataManager.getOrCreateWorkoutLog(for: date)
+        
+        _ = coreDataManager.addWorkoutSet(
+            to: workoutLog,
+            exercise: exercise,
+            weight: weight,
+            reps: reps
+        )
+        
+        loadWorkouts(for: date)
+        refreshDatesWithWorkouts()
+        
+        // トレーニング更新の通知を送信
+        NotificationCenter.default.post(name: .workoutUpdated, object: nil)
+    }
+    
+    // ワークアウトセットを更新
+    func updateWorkoutSet(_ workoutSet: WorkoutSet, weight: Double, reps: Int) {
+        workoutSet.weight = weight
+        workoutSet.reps = Int16(reps)
+        
         do {
-            let workoutLog = coreDataManager.getOrCreateWorkoutLog(for: date)
+            try coreDataManager.viewContext.save()
             
-            _ = coreDataManager.addWorkoutSet(
-                to: workoutLog,
-                exercise: exercise,
-                weight: weight,
-                reps: reps
-            )
-            
-            loadWorkouts(for: date)
+            if let date = workoutSet.workoutLog?.date {
+                loadWorkouts(for: date)
+            }
             refreshDatesWithWorkouts()
-            
-            // トレーニング更新の通知を送信
             NotificationCenter.default.post(name: .workoutUpdated, object: nil)
         } catch {
-            errorMessage = "トレーニングの追加に失敗しました"
+            errorMessage = "トレーニングの更新に失敗しました"
             showError = true
-            print("ワークアウト追加エラー: \(error)")
+            print("WorkoutSet更新エラー: \(error)")
         }
     }
     

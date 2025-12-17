@@ -5,6 +5,7 @@ import SwiftUI
 struct WorkoutSetRow: View {
     let set: WorkoutSet
     var onDelete: (() -> Void)? = nil
+    var onEdit: (() -> Void)? = nil
     var showDate: Bool = false
     
     private var dateFormatter: DateFormatter {
@@ -35,32 +36,30 @@ struct WorkoutSetRow: View {
             
             Spacer()
             
-            if let onDelete = onDelete {
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .foregroundColor(Color.primaryRed)
+            HStack(spacing: 12) {
+                if let onEdit = onEdit {
+                    Button(action: onEdit) {
+                        Image(systemName: "pencil")
+                            .foregroundColor(Color.primaryRed)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
+                }
+                
+                if let onDelete = onDelete {
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .foregroundColor(Color.primaryRed)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
                 }
             }
         }
         .padding()
         .background(Color.white)
         .cornerRadius(10)
-    }
-}
-
-struct WorkoutSetRow_Previews: PreviewProvider {
-    static var previews: some View {
-        let context = PreviewHelper.createPreviewContext()
-        let set = (context.registeredObjects.first { $0 is WorkoutSet }) as! WorkoutSet
-        
-        return VStack {
-            WorkoutSetRow(set: set)
-            
-            WorkoutSetRow(set: set, onDelete: {})
-            
-            WorkoutSetRow(set: set, showDate: true)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onEdit?()
         }
-        .padding()
-        .background(Color.lightGray)
     }
 }

@@ -5,6 +5,10 @@ import SwiftUI
 struct CalendarView: View {
     @StateObject private var viewModel = CalendarViewModel()
     @State private var selectedDate = Date()
+    @State private var showingEditForm = false
+    @State private var selectedWorkoutSet: WorkoutSet?
+    @State private var showingDeleteConfirmation = false
+    @State private var workoutSetToDelete: WorkoutSet?
     
     var body: some View {
         NavigationView {
@@ -54,6 +58,12 @@ struct CalendarView: View {
                                 
                                 Spacer()
                                 
+                                if !viewModel.workoutSets.isEmpty {
+                                    Text("\(viewModel.workoutSets.count)セット")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                                
                                 Button(action: {
                                     viewModel.showWorkoutForm = true
                                 }) {
@@ -66,16 +76,32 @@ struct CalendarView: View {
                             .padding(.top)
                             
                             if viewModel.workoutSets.isEmpty {
-                                Text("この日のトレーニング記録はありません")
-                                    .foregroundColor(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .padding()
+                                VStack(spacing: 8) {
+                                    Image(systemName: "calendar.badge.plus")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(.gray.opacity(0.5))
+                                    Text("この日のトレーニング記録はありません")
+                                        .foregroundColor(.secondary)
+                                    Text("+ボタンで記録を追加できます")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary.opacity(0.7))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 30)
                             } else {
                                 // ワークアウトリスト
                                 ForEach(viewModel.workoutSets, id: \.id) { set in
-                                    WorkoutSetRow(set: set, onDelete: {
-                                        viewModel.deleteWorkoutSet(set)
-                                    })
+                                    WorkoutSetRow(
+                                        set: set,
+                                        onDelete: {
+                                            workoutSetToDelete = set
+                                            showingDeleteConfirmation = true
+                                        },
+                                        onEdit: {
+                                            selectedWorkoutSet = set
+                                            showingEditForm = true
+                                        }
+                                    )
                                     .padding(.horizontal)
                                 }
                             }
@@ -93,6 +119,36 @@ struct CalendarView: View {
                             viewModel.refreshDatesWithWorkouts()
                         }
                     )
+                }
+                .sheet(isPresented: $showingEditForm, onDismiss: {
+                    selectedWorkoutSet = nil
+                    viewModel.loadWorkouts(for: selectedDate)
+                    viewModel.refreshDatesWithWorkouts()
+                }) {
+                    if let workoutSet = selectedWorkoutSet {
+                        EditWorkoutFormView(
+                            workoutSet: workoutSet,
+                            onSave: { weight, reps in
+                                viewModel.updateWorkoutSet(workoutSet, weight: weight, reps: reps)
+                            },
+                            onDelete: {
+                                viewModel.deleteWorkoutSet(workoutSet)
+                            }
+                        )
+                    }
+                }
+                .alert("記録を削除", isPresented: $showingDeleteConfirmation) {
+                    Button("削除", role: .destructive) {
+                        if let set = workoutSetToDelete {
+                            viewModel.deleteWorkoutSet(set)
+                            workoutSetToDelete = nil
+                        }
+                    }
+                    Button("キャンセル", role: .cancel) {
+                        workoutSetToDelete = nil
+                    }
+                } message: {
+                    Text("このトレーニング記録を削除しますか？")
                 }
                 .onAppear {
                     viewModel.refreshDatesWithWorkouts()

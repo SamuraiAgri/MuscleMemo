@@ -1,67 +1,50 @@
-// ファイル: Views/Home/Components/WorkoutFormView.swift
+// ファイル: Views/Common/Components/EditWorkoutFormView.swift
 
 import SwiftUI
 
-struct WorkoutFormView: View {
+struct EditWorkoutFormView: View {
     @Environment(\.presentationMode) private var presentationMode
-    let exercise: Exercise
-    let lastWorkoutSet: WorkoutSet?
+    let workoutSet: WorkoutSet
     let onSave: (Double, Int) -> Void
+    let onDelete: () -> Void
     
-    @State private var weight: Double = 0
-    @State private var reps: Int = 1
-    @State private var weightString: String = "0"
-    @State private var repsString: String = "1"
+    @State private var weight: Double
+    @State private var reps: Int
+    @State private var weightString: String
+    @State private var repsString: String
+    @State private var showingDeleteConfirmation = false
     @FocusState private var focusedField: Field?
-    
-    // よく使う回数のプリセット
-    private let repsPresets = [5, 8, 10, 12, 15]
     
     enum Field {
         case weight, reps
+    }
+    
+    init(workoutSet: WorkoutSet, onSave: @escaping (Double, Int) -> Void, onDelete: @escaping () -> Void) {
+        self.workoutSet = workoutSet
+        self.onSave = onSave
+        self.onDelete = onDelete
+        
+        // 初期値を設定
+        _weight = State(initialValue: workoutSet.weight)
+        _reps = State(initialValue: Int(workoutSet.reps))
+        _weightString = State(initialValue: String(format: "%.1f", workoutSet.weight))
+        _repsString = State(initialValue: "\(workoutSet.reps)")
     }
     
     var body: some View {
         NavigationView {
             Form {
                 Section(header: Text("種目情報")) {
-                    Text(exercise.name ?? "")
+                    Text(workoutSet.exercise?.name ?? "")
                         .font(.headline)
-                }
-                
-                if let lastSet = lastWorkoutSet {
-                    Section(header: Text("前回の記録")) {
-                        HStack {
-                            Text("重量")
-                            Spacer()
-                            Text("\(Int(lastSet.weight))kg")
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        HStack {
-                            Text("回数")
-                            Spacer()
-                            Text("\(lastSet.reps)回")
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        // 前回と同じボタン
-                        Button(action: {
-                            weight = lastSet.weight
-                            weightString = String(format: "%.1f", lastSet.weight)
-                            reps = Int(lastSet.reps)
-                            repsString = "\(lastSet.reps)"
-                        }) {
-                            HStack {
-                                Image(systemName: "arrow.uturn.backward")
-                                Text("前回と同じ記録を使用")
-                            }
-                            .foregroundColor(Color.primaryRed)
-                        }
+                    
+                    if let date = workoutSet.workoutLog?.date {
+                        Text(dateFormatted(date))
+                            .foregroundColor(.secondary)
                     }
                 }
                 
-                Section(header: Text("今回の記録")) {
+                Section(header: Text("トレーニング記録を編集")) {
                     // 重量入力
                     HStack {
                         Text("重量 (kg)")
@@ -143,31 +126,6 @@ struct WorkoutFormView: View {
                         .buttonStyle(BorderlessButtonStyle())
                     }
                     .padding(.vertical, 8)
-                    
-                    // 回数クイック選択
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("クイック選択")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 8) {
-                            ForEach(repsPresets, id: \.self) { preset in
-                                Button(action: {
-                                    reps = preset
-                                    repsString = "\(preset)"
-                                }) {
-                                    Text("\(preset)")
-                                        .font(.system(size: 14, weight: reps == preset ? .bold : .regular))
-                                        .frame(width: 40, height: 32)
-                                        .background(reps == preset ? Color.primaryRed : Color.lightGray)
-                                        .foregroundColor(reps == preset ? .white : Color.darkGray)
-                                        .cornerRadius(8)
-                                }
-                                .buttonStyle(BorderlessButtonStyle())
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
                 }
                 
                 Section {
@@ -180,10 +138,22 @@ struct WorkoutFormView: View {
                             .cornerRadius(8)
                     }
                     .disabled(!isFormValid)
-                    .sensoryFeedback(.impact(flexibility: .rigid), trigger: isFormValid)
+                }
+                
+                Section {
+                    Button(action: {
+                        showingDeleteConfirmation = true
+                    }) {
+                        HStack {
+                            Spacer()
+                            Text("この記録を削除")
+                                .foregroundColor(.red)
+                            Spacer()
+                        }
+                    }
                 }
             }
-            .navigationTitle("\(exercise.name ?? "") を記録")
+            .navigationTitle("記録を編集")
             .navigationBarItems(
                 leading: Button("キャンセル") {
                     presentationMode.wrappedValue.dismiss()
@@ -196,14 +166,14 @@ struct WorkoutFormView: View {
                     }
                 }
             }
-            .onAppear {
-                // 前回の記録があれば初期値として設定
-                if let lastSet = lastWorkoutSet {
-                    weight = lastSet.weight
-                    weightString = String(format: "%.1f", lastSet.weight)
-                    reps = Int(lastSet.reps)
-                    repsString = "\(lastSet.reps)"
+            .alert("記録を削除", isPresented: $showingDeleteConfirmation) {
+                Button("削除", role: .destructive) {
+                    onDelete()
+                    presentationMode.wrappedValue.dismiss()
                 }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("このトレーニング記録を削除しますか？この操作は元に戻せません。")
             }
         }
     }
@@ -212,15 +182,19 @@ struct WorkoutFormView: View {
         return weight > 0 && reps > 0
     }
     
-    // 重量調整ヘルパーメソッド（小数点以下の丸めも実施）
+    private func dateFormatted(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy年MM月dd日(E)"
+        formatter.locale = Locale(identifier: "ja_JP")
+        return formatter.string(from: date)
+    }
+    
     private func adjustWeight(_ delta: Double) {
         let newWeight = max(0, weight + delta)
-        // 小数第一位まで丸める
-        weight = (round(newWeight * 10) / 10).rounded(toPlaces: 1)
+        weight = (round(newWeight * 10) / 10)
         weightString = String(format: "%.1f", weight)
     }
     
-    // 回数調整ヘルパーメソッド
     private func adjustReps(_ delta: Int) {
         let newReps = max(1, reps + delta)
         reps = newReps
@@ -230,13 +204,5 @@ struct WorkoutFormView: View {
     private func saveWorkout() {
         onSave(weight, reps)
         presentationMode.wrappedValue.dismiss()
-    }
-}
-
-// Double型の拡張（小数点以下の丸め処理を追加）
-extension Double {
-    func rounded(toPlaces places: Int) -> Double {
-        let divisor = pow(10.0, Double(places))
-        return (self * divisor).rounded() / divisor
     }
 }
